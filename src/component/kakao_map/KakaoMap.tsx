@@ -1,63 +1,78 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { loadKakaoMap } from "./loadKakaoMap";
 
-// 💡 안전한 더미 데이터 생성 (위경도 오차 범위를 아주 미세하게 조정)
-const dummyPositions = [
-  { lat: 37.451585, lng: 126.657942 },
-  { lat: 37.449585, lng: 126.655942 },
-  { lat: 37.452585, lng: 126.654942 },
-  { lat: 37.448585, lng: 126.658942 },
-  { lat: 37.450585, lng: 126.659942 },
-  { lat: 37.453585, lng: 126.656942 },
-  { lat: 37.447585, lng: 126.656942 },
-  { lat: 37.451000, lng: 126.655000 },
-  { lat: 37.449000, lng: 126.658000 },
-  { lat: 37.452000, lng: 126.657000 },
-];
+export interface MapResponse {
+  postId: number;
+  latitude: number;
+  longitude: number;
+  thumbnailImageUrl: string;
+}
+
+export type MapResponseList = MapResponse[];
 
 export default function KakaoMap() {
   const mapRef = useRef<HTMLDivElement>(null);
+  // 데이터 상태 관리
+  const [data, setData] = useState<MapResponseList>([]);
 
   useEffect(() => {
+    // 1. 데이터 가져오기 (시간 단축을 위해 여기에 바로 작성)
+    const fetchData = async () => {
+      try {
+        const response = await fetch("YOUR_API_ENDPOINT_URL"); // 여기에 API 주소 입력
+        const result: MapResponseList = await response.json();
+        setData(result);
+      } catch (error) {
+        console.error("데이터 로드 실패:", error);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+    // 데이터가 있고 지도가 초기화된 후 마커 생성
+    if (data.length === 0) return;
+
     const initMap = async () => {
       await loadKakaoMap();
-
       if (!mapRef.current) return;
 
-      // 1. 님이 성공한 원본 기준 중심점 생성
       const center = new window.kakao.maps.LatLng(37.450585, 126.656942);
-
-      // 2. 님이 성공한 원본 기준 맵 객체 생성 (변수 map에 할당)
       const map = new window.kakao.maps.Map(mapRef.current, {
         center,
-        level: 4, // 1km 반경이 다 보이도록 레벨만 4로 조정
+        level: 4,
       });
 
-      // 3. 중앙 '내 위치' 기본 마커 생성
+      // 내 위치 마커
       new window.kakao.maps.Marker({
         map: map,
         position: center,
-        title: "내 현재 위치"
+        title: "내 현재 위치",
       });
 
-      // 4. 안전하게 파싱된 더미 배열로 마커만 생성
-      dummyPositions.forEach((pos) => {
-        const markerPosition = new window.kakao.maps.LatLng(pos.lat, pos.lng);
+      // 2. API 데이터로 마커 반복 생성
+      data.forEach((item) => {
+        const markerPosition = new window.kakao.maps.LatLng(
+          item.latitude,
+          item.longitude
+        );
         
         new window.kakao.maps.Marker({
-          map: map, // 위에서 생성한 map 객체 지정
+          map: map,
           position: markerPosition,
+          title: `Post ID: ${item.postId}`,
         });
       });
     };
 
     initMap();
-  }, []);
+  }, [data]); // data가 채워지면 실행
 
   return (
     <div
       ref={mapRef}
-      style={{ width: "100%", height: "500px" }} // 님이 성공한 스타일 그대로 유지
+      style={{ width: "100%", height: "500px" }}
     />
   );
 }

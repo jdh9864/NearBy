@@ -1,114 +1,153 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 
 // ==========================================
-// 💡 1. 사진 import (같은 폴더에 위치)
-// 파일명 뒤에 자동으로 붙는 ' 2', ' 1' 등과 공백을 포함하여
-// 확장자(.jpg로 가정)를 붙여 정확히 import 해야 합니다.
+// API 타입 정의 (주신 명세 기반)
 // ==========================================
-import kakaoImg1 from './KakaoTalk_20260315_121108829 2.png';
-import kakaoImg2 from './KakaoTalk_20260315_140320358 2.png';
-import kakaoImg3 from './KakaoTalk_20260316_144917667_02 1.png';
-import kakaoImg4 from './KakaoTalk_20260316_144917667_03 1.png';
-import kakaoImg5 from './KakaoTalk_20260316_144917667_06 1.png';
-import kakaoImg6 from './KakaoTalk_20260316_144917667_07 1.png';
-import kakaoImg7 from './KakaoTalk_20260316_144917667_09 1.png';
-import kakaoImg8 from './KakaoTalk_20260316_144917667_11 1.png';
-import kakaoImg9 from './KakaoTalk_20260316_144917667_14 1.png';
+export interface PhotoPayload {
+  url: string; 
+  order: number;
+}
 
-// 💡 2. 게시물 데이터 (import한 이미지 변수로 대체)
-const POST_DATA = [
-  {
-    id: 1,
-    user: "jdonghy",
-    avatar: "https://picsum.photos/id/64/50/50",
-    location: "인하대학교 본관",
-    // import한 변수를 배열에 넣습니다.
-    images: [kakaoImg1, kakaoImg2, kakaoImg3], 
-    content: "오늘 날씨 너무 좋네요. 고양이도 보고 힐링 중입니다! 🐱",
-    time: "3분 전"
-  },
-  {
-    id: 2,
-    user: "user_1",
-    avatar: "https://picsum.photos/id/65/50/50",
-    location: "미추홀구 카페",
-    images: [kakaoImg4, kakaoImg5, kakaoImg6],
-    content: "맛있는 빵과 함께 열공 중... 도서관은 벌써 자리가 없네요. 🍞",
-    time: "15분 전"
-  },
-  {
-    id: 3,
-    user: "local_explorer",
-    avatar: "https://picsum.photos/id/66/50/50",
-    location: "학익동 강의실",
-    images: [kakaoImg7, kakaoImg8, kakaoImg9],
-    content: "강의실 창밖으로 보이는 풍경. 시험 기간 파이팅입니다!",
-    time: "1시간 전"
-  }
-];
+export interface PlacePayload {
+  name: string;
+  latitude: number;
+  longitude: number;
+  isMain: boolean;
+  photos: PhotoPayload[];
+}
+
+export interface Post {
+  postId: number;
+  createdAt: string;
+  text?: string | null;
+  places: PlacePayload[];
+}
 
 export default function Draw_bar() {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // 1. 컴포넌트 마운트 시 API 호출하여 게시물 목록 가져오기
+  useEffect(() => {
+    const fetchPosts = async () => {
+      try {
+        // 💡 API 엔드포인트는 실제 백엔드 주소에 맞게 수정해주세요. (예: /api/posts)
+        const response = await axios.get('/api/posts'); 
+        
+        // 페이징 처리된 객체({ content: [...] }) 형태인지, 배열 형태인지 대응
+        const postData = Array.isArray(response.data) ? response.data : response.data.content || [];
+        setPosts(postData);
+      } catch (error) {
+        console.error('게시물을 불러오는데 실패했습니다.', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPosts();
+  }, []);
+
+  // 날짜 포맷팅 헬퍼 함수
+  const formatTime = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('ko-KR', { 
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
   return (
     <div style={styles.drawerContainer}>
-      {/* 💡 드로우바 핸들 (위아래로 드래그하는 느낌) */}
+      {/* 💡 드로우바 핸들 */}
       <div style={styles.handleBar}>
         <div style={styles.handle}></div>
       </div>
 
-      {/* 💡 게시물 리스트 영역 (여기서만 스크롤 발생) */}
+      {/* 💡 게시물 리스트 영역 */}
       <div style={styles.scrollArea}>
-        {POST_DATA.map((post) => (
-          <article key={post.id} style={styles.postCard}>
-            {/* 상단 유저 정보 */}
-            <div style={styles.userInfo}>
-              <img src={post.avatar} alt="avatar" style={styles.avatar} />
-              <div>
-                <div style={styles.userId}>{post.user}</div>
-                <div style={styles.location}>📍 {post.location}</div>
-              </div>
-            </div>
+        {loading ? (
+          <div style={{ textAlign: 'center', color: '#888', marginTop: '20px' }}>
+            로딩 중...
+          </div>
+        ) : posts.length === 0 ? (
+          <div style={{ textAlign: 'center', color: '#888', marginTop: '20px' }}>
+            게시물이 없습니다.
+          </div>
+        ) : (
+          posts.map((post) => {
+            // 1. 메인 장소 찾기 (없으면 첫 번째 장소 사용)
+            const mainPlace = post.places.find(p => p.isMain) || post.places[0];
+            
+            // 2. 사진을 order 기준으로 정렬하여 가져오기
+            const sortedPhotos = mainPlace?.photos?.sort((a, b) => a.order - b.order) || [];
+            
+            // 3. UI가 3장의 사진을 요구하므로, 부족할 경우 기본 이미지로 채움
+            const imageUrls = [
+              sortedPhotos[0]?.url || 'https://via.placeholder.com/400x300?text=No+Image',
+              sortedPhotos[1]?.url || 'https://via.placeholder.com/200x150?text=No+Image',
+              sortedPhotos[2]?.url || 'https://via.placeholder.com/200x150?text=No+Image',
+            ];
 
-            {/* 사진 3장 그리드 */}
-            <div style={styles.imageGrid}>
-              <div style={styles.mainImageWrapper}>
-                <img src={post.images[0]} alt="main" style={styles.mainImage} />
-              </div>
-              <div style={styles.subImageWrapper}>
-                <img src={post.images[1]} alt="sub1" style={styles.subImage} />
-                <img src={post.images[2]} alt="sub2" style={styles.subImage} />
-              </div>
-            </div>
+            return (
+              <article key={post.postId} style={styles.postCard}>
+                {/* 상단 유저 정보 */}
+                <div style={styles.userInfo}>
+                  {/* API에 유저 정보가 없으므로 임시 아바타/닉네임 적용 */}
+                  <img src="https://via.placeholder.com/50" alt="avatar" style={styles.avatar} />
+                  <div>
+                    <div style={styles.userId}>익명 사용자</div>
+                    <div style={styles.location}>
+                      📍 {mainPlace?.name || "위치 알 수 없음"}
+                    </div>
+                  </div>
+                </div>
 
-            {/* 하단 본문 내용 */}
-            <div style={styles.postBody}>
-              <p style={styles.content}>{post.content}</p>
-              <span style={styles.time}>{post.time}</span>
-            </div>
-          </article>
-        ))}
+                {/* 사진 3장 그리드 */}
+                <div style={styles.imageGrid}>
+                  <div style={styles.mainImageWrapper}>
+                    <img src={imageUrls[0]} alt="main" style={styles.mainImage} />
+                  </div>
+                  <div style={styles.subImageWrapper}>
+                    <img src={imageUrls[1]} alt="sub1" style={styles.subImage} />
+                    <img src={imageUrls[2]} alt="sub2" style={styles.subImage} />
+                  </div>
+                </div>
+
+                {/* 하단 본문 내용 */}
+                <div style={styles.postBody}>
+                  <p style={styles.content}>{post.text || ""}</p>
+                  <span style={styles.time}>{formatTime(post.createdAt)}</span>
+                </div>
+              </article>
+            );
+          })
+        )}
       </div>
     </div>
   );
 }
 
 // ==========================================
-// 🎨 인라인 스타일 (스크롤 제약 조건 추가)
+// 🎨 인라인 스타일 (기존 코드와 동일)
 // ==========================================
 const styles: { [key: string]: React.CSSProperties } = {
   drawerContainer: {
-    // 지도 위에 붕 뜨는 바텀 시트 형태로 고정
     position: 'absolute', 
     bottom: 0, 
     left: 0,
     right: 0,
-    height: '50vh', // 화면 전체 높이의 65%까지만 올라오도록 제한
+    height: '50vh',
     backgroundColor: '#1a1a1a', 
     display: 'flex',
     flexDirection: 'column',
     borderTopLeftRadius: '24px',
     borderTopRightRadius: '24px',
-    boxShadow: '0 -4px 15px rgba(0,0,0,0.5)', // 위로 올라오는 그림자 효과 추가
-    zIndex: 10, // 지도보다 무조건 위에 오도록
+    boxShadow: '0 -4px 15px rgba(0,0,0,0.5)', 
+    zIndex: 10,
     overflow: 'hidden',
   },
   handleBar: {
@@ -116,7 +155,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     display: 'flex',
     justifyContent: 'center',
     cursor: 'pointer',
-    backgroundColor: '#1a1a1a', // 스크롤 시 핸들바 배경 투명해지는 것 방지
+    backgroundColor: '#1a1a1a',
     zIndex: 11,
   },
   handle: {
@@ -126,7 +165,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     borderRadius: '2px',
   },
   scrollArea: {
-    // 남은 공간을 꽉 채우고, 넘치면 스크롤
     flex: 1, 
     overflowY: 'scroll', 
     padding: '0 16px 80px 16px', 

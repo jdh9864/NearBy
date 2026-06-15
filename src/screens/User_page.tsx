@@ -1,41 +1,90 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 
-// 💡 제공해주신 로컬 이미지 불러오기
-import kakaoImg1 from './KakaoTalk_20260315_121108829 2.png';
-import kakaoImg4 from './KakaoTalk_20260316_144917667_03 1.png';
-import kakaoImg7 from './KakaoTalk_20260316_144917667_09 1.png';
-import kakaoImg9 from './KakaoTalk_20260316_144917667_14 1.png'; // 4번째 추가할 사진
+// ==========================================
+// API 타입 정의 (제공해주신 명세 기반)
+// ==========================================
+export interface PhotoPayload {
+  url: string; 
+  order: number;
+}
 
-// 💡 기본 3개의 게시물 (상수)
-const BASE_POSTS = [
-  { id: 1, image: kakaoImg1 },
-  { id: 2, image: kakaoImg4 },
-  { id: 3, image: kakaoImg7 },
-];
+export interface PlacePayload {
+  name: string;
+  latitude: number;
+  longitude: number;
+  isMain: boolean;
+  photos: PhotoPayload[];
+}
 
-// 💡 추가될 4번째 게시물
-const EXTRA_POST = { id: 4, image: kakaoImg9 };
+export interface Post {
+  postId: number;
+  createdAt: string;
+  text?: string | null;
+  places: PlacePayload[];
+}
+
+export interface UpdateProfileResponse {
+  userId: string;
+  nickname: string;
+  imageURL?: string | null;
+}
 
 export default function User_page() {
-  // 💡 [핵심 최적화] 지연 초기화(Lazy Initialization)
-  // 컴포넌트가 처음 마운트될 때 한 번만 실행되어 초기 상태를 즉시 확정짓습니다.
-  const [posts] = useState(() => {
-    // SSR 환경 에러 방지
-    if (typeof window === 'undefined') return BASE_POSTS;
-    
-    // 렌더링 전에 방문 기록을 미리 읽어서 3개로 그릴지 4개로 그릴지 결정
-    const hasVisited = sessionStorage.getItem('userPageVisited');
-    return hasVisited ? [...BASE_POSTS, EXTRA_POST] : BASE_POSTS;
-  });
+  // 💡 상태 관리: 프로필 정보와 게시물 목록
+  const [profile, setProfile] = useState<UpdateProfileResponse | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // 🚀 순수 부수 효과(Side Effect)만 담당
+  // 🚀 API 호출 (컴포넌트 마운트 시 1회 실행)
   useEffect(() => {
-    // 렌더링에 영향을 주지 않고, 첫 방문일 때만 세션 스토리지에 도장을 찍습니다.
-    const hasVisited = sessionStorage.getItem('userPageVisited');
-    if (!hasVisited) {
-      sessionStorage.setItem('userPageVisited', 'true');
-    }
+    const fetchUserData = async () => {
+      try {
+        setLoading(true);
+        
+        // 1. 내 프로필 정보 가져오기 (엔드포인트는 실제 서버에 맞게 조정 필요)
+        const profileResponse = await axios.get<UpdateProfileResponse>('/api/users/my');
+        setProfile(profileResponse.data);
+
+        // 2. 내 게시물 목록 가져오기
+        const postsResponse = await axios.get('/api/posts', {
+          // 필요하다면 Query Params 추가 (예: userId: profileResponse.data.userId)
+        });
+        
+        // 페이징 객체({ content: [...] }) 또는 배열 형태 대응
+        const postsData = Array.isArray(postsResponse.data) 
+          ? postsResponse.data 
+          : postsResponse.data.content || [];
+          
+        setPosts(postsData);
+      } catch (error) {
+        console.error('유저 데이터를 불러오는데 실패했습니다.', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
   }, []);
+
+  // 💡 게시물에서 썸네일(메인 장소의 첫 번째 사진)을 추출하는 헬퍼 함수
+  const getThumbnailUrl = (post: Post) => {
+    const mainPlace = post.places.find(p => p.isMain) || post.places[0];
+    if (!mainPlace || !mainPlace.photos || mainPlace.photos.length === 0) {
+      return 'https://via.placeholder.com/150?text=No+Image'; // 기본 이미지
+    }
+    // order 기준으로 정렬 후 첫 번째 이미지 반환
+    const sortedPhotos = [...mainPlace.photos].sort((a, b) => a.order - b.order);
+    return sortedPhotos[0].url;
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-[#121212] text-white">
+        로딩 중...
+      </div>
+    );
+  }
 
   return (
     // 부모 컨테이너: 전체 다크 배경 설정 및 세로 스크롤 허용
@@ -43,7 +92,7 @@ export default function User_page() {
       
       {/* 1. 상단 헤더 */}
       <header className="flex justify-between items-center h-[50px] px-4 border-b border-[#262626] shrink-0">
-        <span className="text-lg font-bold">jdonghy</span>
+        <span className="text-lg font-bold">{profile?.nickname || '사용자'}</span>
         <button className="text-2xl focus:outline-none">≡</button>
       </header>
 
@@ -51,14 +100,13 @@ export default function User_page() {
       <div className="p-4 shrink-0">
         <div className="flex items-center justify-between mb-4">
           <img 
-            src="https://picsum.photos/id/64/80/80" 
+            src={profile?.imageURL || "https://picsum.photos/id/64/80/80"} 
             alt="profile avatar" 
             className="w-20 h-20 rounded-full object-cover border border-[#333]" 
           />
           
           <div className="flex flex-1 justify-around text-center ml-4">
             <div>
-              {/* 💡 동적 렌더링: 게시물 개수가 상태에 맞춰 자동으로 바뀜 */}
               <div className="font-bold text-lg">{posts.length}</div>
               <div className="text-[11px] text-[#eee]">게시물</div>
             </div>
@@ -74,7 +122,7 @@ export default function User_page() {
         </div>
 
         <div className="mb-4">
-          <h2 className="font-bold text-[14px]">정동혁</h2>
+          <h2 className="font-bold text-[14px]">{profile?.nickname || '이름 없음'}</h2>
           <p className="text-[13px] text-[#eee] mt-1 leading-relaxed">
             알고리즘 전공자 💻 | 인하대 🦅<br />
             로컬 맵 프로젝트 개발 중 🔥
@@ -104,11 +152,15 @@ export default function User_page() {
         </div>
       </div>
 
-      {/* 4. 게시물 그리드 (상태 posts 매핑) */}
+      {/* 4. 게시물 그리드 (API에서 받아온 posts 매핑) */}
       <div className="grid grid-cols-3 gap-[2px] pb-6">
         {posts.map(post => (
-          <div key={post.id} className="aspect-square bg-[#262626] cursor-pointer hover:opacity-80 transition-opacity">
-            <img src={post.image} alt={`post_${post.id}`} className="w-full h-full object-cover" />
+          <div key={post.postId} className="aspect-square bg-[#262626] cursor-pointer hover:opacity-80 transition-opacity">
+            <img 
+              src={getThumbnailUrl(post)} 
+              alt={`post_${post.postId}`} 
+              className="w-full h-full object-cover" 
+            />
           </div>
         ))}
       </div>
