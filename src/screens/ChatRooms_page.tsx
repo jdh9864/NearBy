@@ -1,8 +1,17 @@
-import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import type { StompSubscription } from '@stomp/stompjs';
+import api from '../lib/api';
+import { useUserStore } from '../store/use_user';
+import { getUserIdFromToken } from '../lib/jwt';
+import {
+  connectChat,
+  subscribeRoom,
+  publishMessage,
+  type IncomingMessage,
+} from '../lib/chatSocket';
 
 // ==========================================
-// API 타입 정의 (주신 명세 기반)
+// API 타입 정의 (백엔드 ChatDto 기준)
 // ==========================================
 export interface TargetUser {
   userId: number;
@@ -10,36 +19,32 @@ export interface TargetUser {
   profileImageUrl?: string | null;
 }
 
+// 백엔드 ChatDto.ChatRoomListResponse
 export interface ChatroomItem {
-  chatroomId: number;
+  chatRoomId: number;
   type: string;
-  targetUser: TargetUser;
-  lastMessage?: string; // API 응답에 따라 다를 수 있음
-  lastMessageTime?: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
   unreadCount?: number;
+  regionName?: string | null;
+  targetUser?: TargetUser | null; // PERSONAL 타입일 때만 존재
 }
 
-export interface ChatMessage {
-  messageId: number;
-  user: {
-    nickname: string;
-  };
-  type: string;
-  content: string;
-  time: string;
-}
+// 시연용 동네(REGION) 코드. 인하대=인천 미추홀구 용현동 법정동코드.
+// dummy_data.sql 에 이 코드로 REGION 방이 시드돼 있어야 입장 가능.
+const REGION_CODE = import.meta.env.VITE_REGION_CODE ?? '2817710200';
 
 export default function ChatRoomPage() {
-  // 💡 [핵심] 상태 관리
+  const accessToken = useUserStore((s) => s.accessToken);
+  const myUserId = useMemo(() => getUserIdFromToken(accessToken), [accessToken]);
+
   const [rooms, setRooms] = useState<ChatroomItem[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<Record<number, ChatMessage[]>>({});
+  const [messages, setMessages] = useState<Record<number, IncomingMessage[]>>({});
   const [inputText, setInputText] = useState('');
-  
-  // 내 닉네임 (메시지 좌우 배치를 위해 비교할 용도 - 실제 로그인 유저 정보로 교체 필요)
-  const MY_NICKNAME = "내닉네임"; 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const subscriptionRef = useRef<StompSubscription | null>(null);
 
   // 스크롤 맨 아래로
   useEffect(() => {
@@ -48,91 +53,83 @@ export default function ChatRoomPage() {
     }
   }, [messages, activeRoomId]);
 
-  // 1. 컴포넌트 마운트 시 채팅방 목록 불러오기
+  // 1. 마운트 시: 동네방 자동 입장 -> 방 목록 로드 -> WebSocket 연결
   useEffect(() => {
-    const fetchRooms = async () => {
+    const init = async () => {
       try {
-        const response = await axios.get('/api/chats');
-        // API 응답 구조에 맞게 수정 필요 (배열을 반환한다고 가정)
+        // 동네 채팅방 입장(이미 멤버면 그대로). 멤버여야 메시지 전송 가능.
+        await api.post('/api/chats/enter', { regionCode: REGION_CODE });
+      } catch (error) {
+        console.error('동네 채팅방 입장 실패:', error);
+      }
+
+      try {
+        // 백엔드: GET /api/chats -> List<ChatRoomListResponse>
+        const response = await api.get('/api/chats');
         const roomData = Array.isArray(response.data) ? response.data : response.data.content || [];
         setRooms(roomData);
       } catch (error) {
         console.error('채팅방 목록을 불러오는데 실패했습니다.', error);
       }
+
+      // WebSocket 연결 미리 준비
+      connectChat().catch((e) => console.error('채팅 서버 연결 실패:', e));
     };
-    fetchRooms();
+    init();
+
+    // 언마운트 시 현재 구독 해제
+    return () => {
+      subscriptionRef.current?.unsubscribe();
+      subscriptionRef.current = null;
+    };
   }, []);
 
-  // 2. 채팅방 클릭 -> 입장 및 메시지 목록 불러오기
+  // 2. 채팅방 클릭 -> WebSocket 구독 (히스토리 REST 없음: 라이브 메시지만)
   const handleRoomClick = async (roomId: number) => {
     setActiveRoomId(roomId);
-    
-    // 안읽은 메시지 수 초기화 (UI 업데이트)
-    setRooms(prevRooms =>
-      prevRooms.map(room =>
-        room.chatroomId === roomId ? { ...room, unreadCount: 0 } : room
-      )
+
+    setRooms((prev) =>
+      prev.map((room) => (room.chatRoomId === roomId ? { ...room, unreadCount: 0 } : room))
     );
 
     try {
-      const response = await axios.get(`/api/chat/${roomId}/messages`);
-      // API 응답 구조에 맞게 수정 필요 (배열 반환 가정)
-      const fetchedMessages: ChatMessage[] = Array.isArray(response.data) ? response.data : response.data.content || [];
-      
-      setMessages(prev => ({
-        ...prev,
-        [roomId]: fetchedMessages
-      }));
-    } catch (error) {
-      console.error('메시지를 불러오는데 실패했습니다.', error);
-    }
-  };
-
-  // 3. 메시지 전송
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || activeRoomId === null) return;
-
-    const messageText = inputText;
-    setInputText(''); // 입력창 즉시 초기화
-
-    try {
-      // 서버로 메시지 전송 (명세에 없어서 일반적인 POST 구조로 작성)
-      await axios.post(`/api/chat/${activeRoomId}/messages`, {
-        content: messageText,
-        type: 'TEXT'
+      await connectChat();
+      // 이전 방 구독 해제 후 새 방 구독
+      subscriptionRef.current?.unsubscribe();
+      subscriptionRef.current = subscribeRoom(roomId, (msg) => {
+        setMessages((prev) => ({
+          ...prev,
+          [roomId]: [...(prev[roomId] || []), msg],
+        }));
       });
-
-      // 낙관적 업데이트 (서버 응답 기다리지 않고 화면에 먼저 표시)
-      const newMessage: ChatMessage = {
-        messageId: Date.now(), // 임시 ID
-        user: { nickname: MY_NICKNAME },
-        type: 'TEXT',
-        content: messageText,
-        time: new Date().toISOString(),
-      };
-
-      setMessages(prev => ({
-        ...prev,
-        [activeRoomId]: [...(prev[activeRoomId] || []), newMessage]
-      }));
-
-      // 방 목록의 마지막 메시지 갱신
-      setRooms(prevRooms =>
-        prevRooms.map(room =>
-          room.chatroomId === activeRoomId 
-            ? { ...room, lastMessage: messageText, lastMessageTime: "방금" } 
-            : room
-        )
-      );
     } catch (error) {
-      console.error('메시지 전송 실패:', error);
-      alert('메시지 전송에 실패했습니다.');
+      console.error('채팅방 연결에 실패했습니다.', error);
     }
   };
 
-  // 현재 활성화된 방 정보 추출
-  const activeRoom = rooms.find(r => r.chatroomId === activeRoomId);
+  // 채팅방 나가기 (목록으로) -> 구독 해제
+  const leaveRoom = () => {
+    subscriptionRef.current?.unsubscribe();
+    subscriptionRef.current = null;
+    setActiveRoomId(null);
+  };
+
+  // 3. 메시지 전송 (STOMP 발행). 서버가 발신자 포함 구독자에게 다시 broadcast 하므로 낙관적 추가 안 함.
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || activeRoomId === null || myUserId === null) return;
+
+    publishMessage(activeRoomId, inputText, myUserId);
+    setInputText('');
+  };
+
+  const activeRoom = rooms.find((r) => r.chatRoomId === activeRoomId);
+
+  // 방 표시 이름: REGION 이면 동네명, PERSONAL 이면 상대 닉네임
+  const roomTitle = (room: ChatroomItem) =>
+    room.type === 'REGION'
+      ? room.regionName || '동네 채팅'
+      : room.targetUser?.nickname || '알 수 없음';
 
   // 시간 포맷팅 헬퍼 함수
   const formatTime = (isoString?: string) => {
@@ -147,7 +144,7 @@ export default function ChatRoomPage() {
 
   return (
     <div className="flex flex-col h-screen max-h-[100dvh] bg-[#121212] text-white overflow-hidden relative">
-      
+
       {/* =======================================================
           View 1: 채팅방 목록
       ========================================================*/}
@@ -161,26 +158,24 @@ export default function ChatRoomPage() {
             {rooms.length === 0 ? (
               <div className="p-4 text-center text-[#888]">진행 중인 채팅이 없습니다.</div>
             ) : (
-              rooms.map(room => (
-                <div 
-                  key={room.chatroomId}
-                  onClick={() => handleRoomClick(room.chatroomId)}
+              rooms.map((room) => (
+                <div
+                  key={room.chatRoomId}
+                  onClick={() => handleRoomClick(room.chatRoomId)}
                   className="flex items-center px-4 py-3 border-b border-[#1f1f1f] cursor-pointer hover:bg-[#1a1a1a] transition-colors"
                 >
                   {/* 프로필 이미지 (없으면 기본 이미지 대체) */}
-                  <img 
-                    src={room.targetUser?.profileImageUrl || 'https://via.placeholder.com/50'} 
-                    alt="avatar" 
-                    className="w-12 h-12 rounded-full object-cover shrink-0 bg-[#262626]" 
+                  <img
+                    src={room.targetUser?.profileImageUrl || 'https://via.placeholder.com/50'}
+                    alt="avatar"
+                    className="w-12 h-12 rounded-full object-cover shrink-0 bg-[#262626]"
                   />
-                  
+
                   <div className="flex-1 ml-4 overflow-hidden">
                     <div className="flex justify-between items-baseline mb-1">
-                      <span className="font-bold text-[15px] truncate">
-                        {room.targetUser?.nickname || '알 수 없음'}
-                      </span>
+                      <span className="font-bold text-[15px] truncate">{roomTitle(room)}</span>
                       <span className="text-[#888] text-xs shrink-0 ml-2">
-                        {formatTime(room.lastMessageTime)}
+                        {formatTime(room.lastMessageAt)}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
@@ -207,38 +202,43 @@ export default function ChatRoomPage() {
       {activeRoomId !== null && activeRoom && (
         <div className="flex flex-col h-full w-full absolute inset-0 z-[100] bg-[#121212]">
           <header className="flex items-center h-[50px] px-2 border-b border-[#262626] bg-[#1a1a1a] shrink-0">
-            <button 
-              onClick={() => setActiveRoomId(null)} 
+            <button
+              onClick={leaveRoom}
               className="p-2 text-xl text-white focus:outline-none"
             >
               ←
             </button>
-            <span className="font-bold ml-2">{activeRoom.targetUser?.nickname}</span>
+            <span className="font-bold ml-2">{roomTitle(activeRoom)}</span>
           </header>
 
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
             {messages[activeRoomId]?.map((msg) => {
-              // 💡 닉네임 비교로 나와 상대방 구분
-              const isMe = msg.user.nickname === MY_NICKNAME;
-              
+              // senderId 비교로 나와 상대방 구분
+              const isMe = msg.senderId === myUserId;
+
               return (
-                <div 
-                  key={msg.messageId} 
+                <div
+                  key={msg.messageId}
                   className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div className={`flex items-end max-w-[75%] gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                    <div 
-                      className={`px-4 py-2 text-[15px] leading-snug break-words ${
-                        isMe 
-                          ? 'bg-[#3b82f6] text-white rounded-2xl rounded-tr-sm' 
-                          : 'bg-[#262626] text-[#eee] rounded-2xl rounded-tl-sm'
-                      }`}
-                    >
-                      {msg.content}
+                  <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                    {!isMe && (
+                      <span className="text-[#888] text-[11px] mb-1 ml-1">{msg.senderNickname}</span>
+                    )}
+                    <div className={`flex items-end gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                      <div
+                        className={`px-4 py-2 text-[15px] leading-snug break-words ${
+                          isMe
+                            ? 'bg-[#3b82f6] text-white rounded-2xl rounded-tr-sm'
+                            : 'bg-[#262626] text-[#eee] rounded-2xl rounded-tl-sm'
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                      <span className="text-[#666] text-[10px] shrink-0 mb-1">
+                        {formatTime(msg.createdAt)}
+                      </span>
                     </div>
-                    <span className="text-[#666] text-[10px] shrink-0 mb-1">
-                      {formatTime(msg.time)}
-                    </span>
                   </div>
                 </div>
               );
@@ -246,14 +246,14 @@ export default function ChatRoomPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          <form 
-            onSubmit={handleSendMessage} 
+          <form
+            onSubmit={handleSendMessage}
             className="flex items-end gap-2 p-3 pb-6 border-t border-[#262626] bg-[#1a1a1a] shrink-0"
           >
             <button type="button" className="p-2 text-[#888] text-2xl focus:outline-none shrink-0 leading-none">
               +
             </button>
-            
+
             <div className="flex-1 bg-[#262626] rounded-3xl flex items-end px-4 py-1.5 border border-[#333]">
               <textarea
                 value={inputText}
@@ -270,8 +270,8 @@ export default function ChatRoomPage() {
               />
             </div>
 
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={!inputText.trim()}
               className={`p-2 shrink-0 font-bold ${inputText.trim() ? 'text-[#3b82f6]' : 'text-[#555]'} focus:outline-none`}
             >
@@ -280,7 +280,7 @@ export default function ChatRoomPage() {
           </form>
         </div>
       )}
-      
+
     </div>
   );
 }

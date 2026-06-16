@@ -10,4 +10,8 @@ export default defineConfig({
     tailwindcss(),
     babel({ presets: [reactCompilerPreset()] })
   ],
+  // sockjs-client 가 브라우저 전역 `global` 을 참조함 -> globalThis 로 매핑
+  define: {
+    global: 'globalThis',
+  },
 })

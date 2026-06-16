@@ -1,38 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useEffect } from 'react';
+import api from '../lib/api';
 
 // ==========================================
-// API 타입 정의 (제공해주신 명세 기반)
+// API 타입 정의 (백엔드 DTO 기준)
 // ==========================================
-export interface PhotoPayload {
-  url: string; 
-  order: number;
-}
 
-export interface PlacePayload {
-  name: string;
-  latitude: number;
-  longitude: number;
-  isMain: boolean;
-  photos: PhotoPayload[];
-}
-
+// 백엔드 PostResponse (GET /api/posts/my, /api/posts 의 content 항목)
 export interface Post {
-  postId: number;
-  createdAt: string;
+  id: number;
   text?: string | null;
-  places: PlacePayload[];
+  thumbnailImageUrl: string;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string;
+  userId: number;
 }
 
-export interface UpdateProfileResponse {
-  userId: string;
+// 백엔드 UserDto
+export interface UserProfile {
+  id: number;
   nickname: string;
-  imageURL?: string | null;
+  profileImageUrl?: string | null;
+  kakaoId?: number | null;
 }
 
 export default function User_page() {
   // 💡 상태 관리: 프로필 정보와 게시물 목록
-  const [profile, setProfile] = useState<UpdateProfileResponse | null>(null);
+  // ⚠️ setProfile 은 GET /api/users/my(백엔드 누락) 추가 시 사용 예정
+  const [profile] = useState<UserProfile | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -41,21 +36,21 @@ export default function User_page() {
     const fetchUserData = async () => {
       try {
         setLoading(true);
-        
-        // 1. 내 프로필 정보 가져오기 (엔드포인트는 실제 서버에 맞게 조정 필요)
-        const profileResponse = await axios.get<UpdateProfileResponse>('/api/users/my');
-        setProfile(profileResponse.data);
 
-        // 2. 내 게시물 목록 가져오기
-        const postsResponse = await axios.get('/api/posts', {
-          // 필요하다면 Query Params 추가 (예: userId: profileResponse.data.userId)
-        });
-        
-        // 페이징 객체({ content: [...] }) 또는 배열 형태 대응
-        const postsData = Array.isArray(postsResponse.data) 
-          ? postsResponse.data 
+        // 1. 내 프로필 정보 가져오기
+        // ⚠️ TODO(백엔드 누락): 백엔드에 GET /api/users/my 가 없음 (PUT만 존재).
+        //    프로필 조회 엔드포인트가 추가되면 아래 주석을 해제할 것.
+        // const profileResponse = await api.get<UserProfile>('/api/users/my');
+        // setProfile(profileResponse.data);
+
+        // 2. 내 게시물 목록 가져오기 (백엔드: GET /api/posts/my -> SliceResponse<PostResponse>)
+        const postsResponse = await api.get('/api/posts/my');
+
+        // SliceResponse 는 { content: [...] } 형태
+        const postsData = Array.isArray(postsResponse.data)
+          ? postsResponse.data
           : postsResponse.data.content || [];
-          
+
         setPosts(postsData);
       } catch (error) {
         console.error('유저 데이터를 불러오는데 실패했습니다.', error);
@@ -67,16 +62,9 @@ export default function User_page() {
     fetchUserData();
   }, []);
 
-  // 💡 게시물에서 썸네일(메인 장소의 첫 번째 사진)을 추출하는 헬퍼 함수
-  const getThumbnailUrl = (post: Post) => {
-    const mainPlace = post.places.find(p => p.isMain) || post.places[0];
-    if (!mainPlace || !mainPlace.photos || mainPlace.photos.length === 0) {
-      return 'https://via.placeholder.com/150?text=No+Image'; // 기본 이미지
-    }
-    // order 기준으로 정렬 후 첫 번째 이미지 반환
-    const sortedPhotos = [...mainPlace.photos].sort((a, b) => a.order - b.order);
-    return sortedPhotos[0].url;
-  };
+  // 백엔드 PostResponse 는 thumbnailImageUrl 을 직접 제공
+  const getThumbnailUrl = (post: Post) =>
+    post.thumbnailImageUrl || 'https://via.placeholder.com/150?text=No+Image';
 
   if (loading) {
     return (
@@ -100,7 +88,7 @@ export default function User_page() {
       <div className="p-4 shrink-0">
         <div className="flex items-center justify-between mb-4">
           <img 
-            src={profile?.imageURL || "https://picsum.photos/id/64/80/80"} 
+            src={profile?.profileImageUrl || "https://picsum.photos/id/64/80/80"}
             alt="profile avatar" 
             className="w-20 h-20 rounded-full object-cover border border-[#333]" 
           />
@@ -155,10 +143,10 @@ export default function User_page() {
       {/* 4. 게시물 그리드 (API에서 받아온 posts 매핑) */}
       <div className="grid grid-cols-3 gap-[2px] pb-6">
         {posts.map(post => (
-          <div key={post.postId} className="aspect-square bg-[#262626] cursor-pointer hover:opacity-80 transition-opacity">
-            <img 
-              src={getThumbnailUrl(post)} 
-              alt={`post_${post.postId}`} 
+          <div key={post.id} className="aspect-square bg-[#262626] cursor-pointer hover:opacity-80 transition-opacity">
+            <img
+              src={getThumbnailUrl(post)}
+              alt={`post_${post.id}`}
               className="w-full h-full object-cover" 
             />
           </div>

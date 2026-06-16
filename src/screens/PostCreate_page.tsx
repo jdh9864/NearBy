@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import axios from 'axios';
+import api from '../lib/api';
 
 // ==========================================
 // API 타입 정의 (주신 명세 기반)
@@ -13,7 +13,7 @@ export interface PlacePayload {
   name: string;
   latitude: number;
   longitude: number;
-  isMain: boolean;
+  isKey: boolean; // 백엔드 PostDto.PlaceDto.isKey 와 일치 (메인 장소 여부)
   photos: PhotoPayload[];
 }
 
@@ -88,7 +88,7 @@ export default function PostCreatePage({ onComplete }: PostCreatePageProps) {
             name: "임시 위치", // 위치 선택 UI가 없으므로 임의값 적용
             latitude: 37.5665,
             longitude: 126.9780,
-            isMain: true,
+            isKey: true,
             photos: selectedImages.map((_, idx) => ({
               url: `https://uploaded-image-url.com/temp_${idx}.jpg`, // 실제 S3 URL 등으로 교체 필요
               order: idx + 1
@@ -97,8 +97,8 @@ export default function PostCreatePage({ onComplete }: PostCreatePageProps) {
         ]
       };
 
-      // API 호출 (엔드포인트는 실제 서버 주소에 맞게 수정)
-      await axios.post('/api/posts', payload);
+      // 백엔드: POST /api/posts/create, 응답은 생성된 postId(Long) 단일 값
+      await api.post<number>('/api/posts/create', payload);
 
       alert('✅ 성공적으로 생성되었습니다!');
       

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadKakaoMap } from "./loadKakaoMap";
+import api from "../../lib/api";
+import { useUserStore } from "../../store/use_user";
 
 export interface MapResponse {
   postId: number;
@@ -14,21 +16,26 @@ export default function KakaoMap() {
   const mapRef = useRef<HTMLDivElement>(null);
   // 데이터 상태 관리
   const [data, setData] = useState<MapResponseList>([]);
+  const { latitude, longitude } = useUserStore();
 
   useEffect(() => {
-    // 1. 데이터 가져오기 (시간 단축을 위해 여기에 바로 작성)
+    // 백엔드: GET /api/v1/map/nearby?latitude=&longitude= -> MapResponse[]
     const fetchData = async () => {
       try {
-        const response = await fetch("YOUR_API_ENDPOINT_URL"); // 여기에 API 주소 입력
-        const result: MapResponseList = await response.json();
-        setData(result);
+        const response = await api.get<MapResponseList>("/api/v1/map/nearby", {
+          params: {
+            latitude: latitude ?? 37.450585,
+            longitude: longitude ?? 126.656942,
+          },
+        });
+        setData(response.data);
       } catch (error) {
         console.error("데이터 로드 실패:", error);
       }
     };
 
     fetchData();
-  }, []);
+  }, [latitude, longitude]);
 
   useEffect(() => {
     // 데이터가 있고 지도가 초기화된 후 마커 생성

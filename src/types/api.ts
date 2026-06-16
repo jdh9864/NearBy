@@ -7,7 +7,7 @@ export interface PlacePayload {
   name: string;
   latitude: number;
   longitude: number;
-  isMain: boolean;
+  isKey: boolean; // 백엔드 PostDto.PlaceDto.isKey
   photos: PhotoPayload[];
 }
 
@@ -16,14 +16,35 @@ export interface CreatePostRequest {
   places: PlacePayload[]; // isNullable: N
 }
 
-export interface CreatePostResponse {
-  postId: number;
-  createdAt: string; 
+// 백엔드 POST /api/posts/create 응답은 생성된 postId(Long) 단일 값
+export type CreatePostResponse = number;
+
+// 목록 응답 항목: 백엔드 PostResponse (GET /api/posts, /api/posts/my)
+export interface PostResponse {
+  id: number;
+  text?: string | null;
+  thumbnailImageUrl: string;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string;
+  userId: number;
 }
 
-export interface Post extends CreatePostRequest {
-  postId: number;
-  createdAt: string;
+// 상세 응답: 백엔드 GET /api/posts/{postId} -> PostDto (places 포함)
+export interface PostDetail {
+  id: number;
+  text?: string | null;
+  places: PlacePayload[];
+}
+
+// SliceResponse<T> 래퍼 (목록 페이징 공통 구조)
+export interface SliceResponse<T> {
+  content: T[];
+  pageNumber: number;
+  pageSize: number;
+  isFirst: boolean;
+  isLast: boolean;
+  hasNext: boolean;
 }
 
 export interface GetPostsQueryParams {
@@ -35,17 +56,17 @@ export interface GetPostsQueryParams {
   longitude?: number;
 }
 
-export interface UpdateProfileRequest {
+// 백엔드 UserDto (PUT /api/users/my 요청/응답 공통)
+// ⚠️ 백엔드에 GET /api/users/my 는 없음 (PUT만 존재)
+export interface UserDto {
+  id?: number | null;
   nickname?: string | null;
-  imageURL?: string | null;
+  profileImageUrl?: string | null;
+  kakaoId?: number | null;
 }
 
-// PUT /api/users/my Response Body
-export interface UpdateProfileResponse {
-  userId: string;
-  nickname: string;
-  imageURL?: string | null;
-}
+export type UpdateProfileRequest = UserDto;
+export type UpdateProfileResponse = UserDto;
 
 
 // ==========================================

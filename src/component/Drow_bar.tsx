@@ -1,27 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../lib/api';
 
 // ==========================================
-// API 타입 정의 (주신 명세 기반)
+// API 타입 정의 (백엔드 PostResponse 기준)
 // ==========================================
-export interface PhotoPayload {
-  url: string; 
-  order: number;
-}
-
-export interface PlacePayload {
-  name: string;
-  latitude: number;
-  longitude: number;
-  isMain: boolean;
-  photos: PhotoPayload[];
-}
-
 export interface Post {
-  postId: number;
-  createdAt: string;
+  id: number;
   text?: string | null;
-  places: PlacePayload[];
+  thumbnailImageUrl: string;
+  likeCount: number;
+  commentCount: number;
+  createdAt: string;
+  userId: number;
 }
 
 export default function Draw_bar() {
@@ -32,10 +22,10 @@ export default function Draw_bar() {
   useEffect(() => {
     const fetchPosts = async () => {
       try {
-        // 💡 API 엔드포인트는 실제 백엔드 주소에 맞게 수정해주세요. (예: /api/posts)
-        const response = await axios.get('/api/posts'); 
-        
-        // 페이징 처리된 객체({ content: [...] }) 형태인지, 배열 형태인지 대응
+        // 백엔드: GET /api/posts -> SliceResponse<PostResponse>
+        const response = await api.get('/api/posts');
+
+        // SliceResponse 는 { content: [...] } 형태
         const postData = Array.isArray(response.data) ? response.data : response.data.content || [];
         setPosts(postData);
       } catch (error) {
@@ -79,29 +69,24 @@ export default function Draw_bar() {
           </div>
         ) : (
           posts.map((post) => {
-            // 1. 메인 장소 찾기 (없으면 첫 번째 장소 사용)
-            const mainPlace = post.places.find(p => p.isMain) || post.places[0];
-            
-            // 2. 사진을 order 기준으로 정렬하여 가져오기
-            const sortedPhotos = mainPlace?.photos?.sort((a, b) => a.order - b.order) || [];
-            
-            // 3. UI가 3장의 사진을 요구하므로, 부족할 경우 기본 이미지로 채움
+            // 백엔드 PostResponse 는 썸네일 1장(thumbnailImageUrl)만 제공.
+            // ⚠️ TODO: 다중 사진/장소명이 필요하면 상세 조회(GET /api/posts/{id})로 places 를 받아와야 함.
             const imageUrls = [
-              sortedPhotos[0]?.url || 'https://via.placeholder.com/400x300?text=No+Image',
-              sortedPhotos[1]?.url || 'https://via.placeholder.com/200x150?text=No+Image',
-              sortedPhotos[2]?.url || 'https://via.placeholder.com/200x150?text=No+Image',
+              post.thumbnailImageUrl || 'https://via.placeholder.com/400x300?text=No+Image',
+              'https://via.placeholder.com/200x150?text=No+Image',
+              'https://via.placeholder.com/200x150?text=No+Image',
             ];
 
             return (
-              <article key={post.postId} style={styles.postCard}>
+              <article key={post.id} style={styles.postCard}>
                 {/* 상단 유저 정보 */}
                 <div style={styles.userInfo}>
-                  {/* API에 유저 정보가 없으므로 임시 아바타/닉네임 적용 */}
+                  {/* PostResponse 에는 userId 만 있음 (닉네임/아바타는 별도 조회 필요) */}
                   <img src="https://via.placeholder.com/50" alt="avatar" style={styles.avatar} />
                   <div>
-                    <div style={styles.userId}>익명 사용자</div>
+                    <div style={styles.userId}>{`사용자 ${post.userId}`}</div>
                     <div style={styles.location}>
-                      📍 {mainPlace?.name || "위치 알 수 없음"}
+                      ♡ {post.likeCount} · 💬 {post.commentCount}
                     </div>
                   </div>
                 </div>
