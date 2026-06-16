@@ -12,12 +12,12 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      babel({ presets: [reactCompilerPreset()] })
+      babel({ presets: [reactCompilerPreset()] })//fdsafaf
     ],
     define: {
       // 1. 기존 global 매핑 유지
       global: 'globalThis',
-//h
+//fsda
       // 2. 환경 변수를 process.env 객체로 매핑 (코드 수정 최소화)
       'process.env.VITE_API_BASE_URL': JSON.stringify(env.VITE_API_BASE_URL),
       'process.env.VITE_KAKAO_REST_KEY': JSON.stringify(env.VITE_KAKAO_REST_KEY),
