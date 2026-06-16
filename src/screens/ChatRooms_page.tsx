@@ -92,15 +92,37 @@ export default function ChatRoomPage() {
       prev.map((room) => (room.chatRoomId === roomId ? { ...room, unreadCount: 0 } : room))
     );
 
+    // 과거 메시지(히스토리) 먼저 로드 -> 그 위에 라이브 메시지 누적
+    try {
+      const res = await api.get(`/api/chats/${roomId}/messages`);
+      const history: IncomingMessage[] = Array.isArray(res.data)
+        ? res.data
+        : res.data.content || [];
+      setMessages((prev) => ({ ...prev, [roomId]: history }));
+    } catch (error) {
+      console.error('메시지 기록을 불러오는데 실패했습니다.', error);
+    }
+
     try {
       await connectChat();
       // 이전 방 구독 해제 후 새 방 구독
       subscriptionRef.current?.unsubscribe();
       subscriptionRef.current = subscribeRoom(roomId, (msg) => {
-        setMessages((prev) => ({
-          ...prev,
-          [roomId]: [...(prev[roomId] || []), msg],
-        }));
+        setMessages((prev) => {
+          const list = prev[roomId] || [];
+          // 내가 보낸 echo면, 같은 내용의 임시 메시지(음수 id)를 실제 메시지로 교체
+          if (msg.senderId === myUserId) {
+            const idx = list.findIndex(
+              (m) => m.messageId < 0 && m.senderId === msg.senderId && m.content === msg.content
+            );
+            if (idx !== -1) {
+              const next = [...list];
+              next[idx] = msg;
+              return { ...prev, [roomId]: next };
+            }
+          }
+          return { ...prev, [roomId]: [...list, msg] };
+        });
       });
     } catch (error) {
       console.error('채팅방 연결에 실패했습니다.', error);
@@ -114,12 +136,27 @@ export default function ChatRoomPage() {
     setActiveRoomId(null);
   };
 
-  // 3. 메시지 전송 (STOMP 발행). 서버가 발신자 포함 구독자에게 다시 broadcast 하므로 낙관적 추가 안 함.
+  // 3. 메시지 전송 (STOMP 발행) + 낙관적 업데이트(내 메시지 즉시 표시).
+  //    서버 echo 가 도착하면 구독 콜백에서 임시 메시지를 실제 메시지로 교체(중복 방지).
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputText.trim() || activeRoomId === null || myUserId === null) return;
 
-    publishMessage(activeRoomId, inputText, myUserId);
+    const content = inputText.trim();
+    const roomId = activeRoomId;
+
+    // 임시 메시지(음수 id) 즉시 추가 -> 내가 보낸 게 바로 보임
+    const optimistic: IncomingMessage = {
+      messageId: -Date.now(),
+      senderId: myUserId,
+      senderNickname: '나',
+      type: 'TEXT',
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => ({ ...prev, [roomId]: [...(prev[roomId] || []), optimistic] }));
+
+    publishMessage(roomId, content, myUserId);
     setInputText('');
   };
 

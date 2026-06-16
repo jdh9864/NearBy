@@ -6,8 +6,13 @@
 //    셋이 글자까지 완전히 동일해야 함. 미설정 시 현재 배포 주소(origin)를 사용.
 const KAKAO_REST_KEY = import.meta.env.VITE_KAKAO_REST_KEY;
 
+// 미설정 / 빈값 / 예시 placeholder('your-app') 면 현재 접속 주소(origin)를 사용.
+// -> redirect_uri 가 실제 보고 있는 배포 주소와 자동으로 일치하므로 잘못된 값으로 인한 로그인 실패 방지.
+const RAW_REDIRECT_URI = import.meta.env.VITE_KAKAO_REDIRECT_URI;
 export const KAKAO_REDIRECT_URI =
-  import.meta.env.VITE_KAKAO_REDIRECT_URI ?? window.location.origin;
+  RAW_REDIRECT_URI && RAW_REDIRECT_URI.trim() && !RAW_REDIRECT_URI.includes('your-app')
+    ? RAW_REDIRECT_URI.trim()
+    : window.location.origin;
 
 export function redirectToKakaoLogin() {
   const url =
